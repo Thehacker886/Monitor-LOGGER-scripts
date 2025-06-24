@@ -1,7 +1,7 @@
 -- Script Logger usando Orion Library
 -- Monitora e exibe scripts executados no servidor
 
-local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local OrionLib = loadstring(game:HttpGet('https://raw.githubusercontent.com/VerbalHubz/Verbal-Hub/refs/heads/main/Orion%20Hub%20Ui%20V3'))()
 
 -- Configuração da janela principal
 local Window = OrionLib:MakeWindow({
