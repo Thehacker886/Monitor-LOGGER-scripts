@@ -1,0 +1,896 @@
+-- Script Logger usando Orion Library
+-- Monitora e exibe scripts executados no servidor
+
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+
+-- Configuração da janela principal
+local Window = OrionLib:MakeWindow({
+    Name = "Script Logger - Monitor de Atividades",
+    HidePremium = false,
+    SaveConfig = true,
+    ConfigFolder = "ScriptLogger"
+})
+
+-- Variáveis globais
+local scriptLogs = {}
+local maxLogs = 100
+local isLogging = true
+local logCount = 0
+
+-- Função para formatar timestamp
+local function getTimestamp()
+    return os.date("[%H:%M:%S]")
+end
+
+-- Função para adicionar log
+local function addLog(playerName, scriptInfo, scriptType)
+    if not isLogging then return end
+    
+    logCount = logCount + 1
+    local logEntry = {
+        id = logCount,
+        timestamp = getTimestamp(),
+        player = playerName or "Desconhecido",
+        script = scriptInfo or "Script Desconhecido",
+        type = scriptType or "Executado",
+        time = tick()
+    }
+    
+    table.insert(scriptLogs, 1, logEntry)
+    
+    -- Limita o número de logs
+    if #scriptLogs > maxLogs then
+        table.remove(scriptLogs, #scriptLogs)
+    end
+    
+    -- Atualiza a interface se existir
+    if logListBox then
+        updateLogDisplay()
+    end
+end
+
+-- Função para detectar scripts
+local function detectScripts()
+    -- Monitor de novos scripts criados
+    local function onChildAdded(child)
+        if child:IsA("LocalScript") or child:IsA("Script") then
+            local player = game.Players:GetPlayerFromCharacter(child.Parent) or 
+                          game.Players:FindFirstChild(child.Parent.Name)
+            local playerName = player and player.Name or "Sistema"
+            
+            addLog(playerName, child.Name, "Script Criado")
+        end
+    end
+    
+    -- Monitora workspace
+    workspace.ChildAdded:Connect(onChildAdded)
+    workspace.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+            local player = game.Players:GetPlayerFromCharacter(descendant.Parent) or 
+                          game.Players:FindFirstChild(descendant.Parent.Name)
+            local playerName = player and player.Name or "Sistema"
+            
+            addLog(playerName, descendant.Name, "Script Detectado")
+        end
+    end)
+    
+    -- Monitora players
+    for _, player in pairs(game.Players:GetPlayers()) do
+        if player.Character then
+            player.Character.ChildAdded:Connect(onChildAdded)
+            player.Character.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+                    addLog(player.Name, descendant.Name, "Script no Character")
+                end
+            end)
+        end
+        
+        player.CharacterAdded:Connect(function(character)
+            character.ChildAdded:Connect(onChildAdded)
+            character.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+                    addLog(player.Name, descendant.Name, "Script no Character")
+                end
+            end)
+        end)
+    end
+    
+    -- Monitora novos players
+    game.Players.PlayerAdded:Connect(function(player)
+        player.CharacterAdded:Connect(function(character)
+            character.ChildAdded:Connect(onChildAdded)
+            character.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+                    addLog(player.Name, descendant.Name, "Script no Character")
+                end
+            end)
+        end)
+    end)
+end
+
+-- Tab principal - Logs
+local LogTab = Window:MakeTab({
+    Name = "📋 Logs de Scripts",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Variável global para o log display
+logListBox = nil
+
+-- Função para atualizar display dos logs
+function updateLogDisplay()
+    if not logListBox then return end
+    
+    local displayText = ""
+    for i, log in ipairs(scriptLogs) do
+        if i > 20 then break end -- Mostra apenas os 20 mais recentes
+        displayText = displayText .. string.format(
+            "%s [%s] %s executou: %s (%s)\n",
+            log.timestamp,
+            log.type,
+            log.player,
+            log.script,
+            log.id
+        )
+    end
+    
+    if displayText == "" then
+        displayText = "Nenhum script detectado ainda..."
+    end
+    
+    -- Atualiza o texto (isso pode variar dependendo da versão da Orion)
+    -- Como a Orion não tem update direto para labels, recriaremos se necessário
+end
+
+-- Seção de status
+LogTab:AddSection({
+    Name = "Status do Logger"
+})
+
+local statusLabel = LogTab:AddLabel("Status: Ativo - Logs: 0")
+
+-- Toggle para ativar/desativar logging
+LogTab:AddToggle({
+    Name = "Ativar Logger",
+    Default = true,
+    Callback = function(Value)
+        isLogging = Value
+        statusLabel:Set(string.format("Status: %s - Logs: %d", 
+            isLogging and "Ativo" or "Inativo", #scriptLogs))
+    end    
+})
+
+-- Seção de logs
+LogTab:AddSection({
+    Name = "Logs Recentes"
+})
+
+-- Display dos logs
+local logDisplay = LogTab:AddLabel("Aguardando detecção de scripts...")
+
+-- Função para atualizar o display periodicamente
+spawn(function()
+    while true do
+        wait(1)
+        if isLogging then
+            local displayText = ""
+            for i = 1, math.min(10, #scriptLogs) do
+                local log = scriptLogs[i]
+                displayText = displayText .. string.format(
+                    "%s %s: %s\n",
+                    log.timestamp,
+                    log.player,
+                    log.script
+                )
+            end
+            
+            if displayText == "" then
+                displayText = "Nenhum script detectado..."
+            end
+            
+            logDisplay:Set(displayText)
+            statusLabel:Set(string.format("Status: %s - Logs: %d", 
+                isLogging and "Ativo" or "Inativo", #scriptLogs))
+        end
+    end
+end)
+
+-- Botão para limpar logs
+LogTab:AddButton({
+    Name = "Limpar Logs",
+    Callback = function()
+        scriptLogs = {}
+        logCount = 0
+        logDisplay:Set("Logs limpos!")
+        statusLabel:Set(string.format("Status: %s - Logs: 0", 
+            isLogging and "Ativo" or "Inativo"))
+    end    
+})
+
+-- Tab de Jogo
+local GameTab = Window:MakeTab({
+    Name = "🎮 Jogo",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Função para obter informações do jogo
+local function getGameInfo()
+    local gameInfo = {
+        name = game.Name or "Nome não disponível",
+        gameId = game.GameId,
+        placeId = game.PlaceId,
+        jobId = game.JobId,
+        creatorType = "",
+        creatorName = "",
+        creatorId = 0,
+        created = "",
+        updated = "",
+        gameLink = "",
+        creatorLink = "",
+        maxPlayers = game.Players.MaxPlayers,
+        currentPlayers = #game.Players:GetPlayers()
+    }
+    
+    -- Determina o tipo de criador e links
+    if game.CreatorType == Enum.CreatorType.User then
+        gameInfo.creatorType = "Usuário"
+        gameInfo.creatorName = game.CreatorName or "Desconhecido"
+        gameInfo.creatorId = game.CreatorId
+        gameInfo.creatorLink = "https://www.roblox.com/users/" .. game.CreatorId .. "/profile"
+    elseif game.CreatorType == Enum.CreatorType.Group then
+        gameInfo.creatorType = "Grupo"
+        gameInfo.creatorName = game.CreatorName or "Desconhecido"
+        gameInfo.creatorId = game.CreatorId
+        gameInfo.creatorLink = "https://www.roblox.com/groups/" .. game.CreatorId
+    end
+    
+    -- Links do jogo
+    gameInfo.gameLink = "https://www.roblox.com/games/" .. game.PlaceId
+    
+    return gameInfo
+end
+
+-- Função para formatar informações do jogo
+local function formatGameInfo(info)
+    local formattedInfo = string.format([[
+🎮 Nome do Jogo: %s
+🆔 Place ID: %d
+🎯 Game ID: %d
+🔗 Job ID: %s
+
+👤 Criado por: %s (%s)
+🆔 ID do Criador: %d
+🔗 Link do Criador: %s
+
+🔗 Link do Jogo: %s
+
+👥 Players: %d/%d
+🌐 Servidor: %s
+]], 
+        info.name,
+        info.placeId,
+        info.gameId,
+        info.jobId,
+        info.creatorName,
+        info.creatorType,
+        info.creatorId,
+        info.creatorLink,
+        info.gameLink,
+        info.currentPlayers,
+        info.maxPlayers,
+        info.jobId:sub(1, 8) .. "..."
+    )
+    
+    return formattedInfo
+end
+
+-- Seção principal de informações do jogo
+GameTab:AddSection({
+    Name = "Informações do Jogo Atual"
+})
+
+-- Obtém e exibe informações do jogo
+local gameInfo = getGameInfo()
+local gameInfoDisplay = GameTab:AddLabel(formatGameInfo(gameInfo))
+
+-- Seção de ações rápidas
+GameTab:AddSection({
+    Name = "Ações Rápidas"
+})
+
+-- Botão para atualizar informações
+GameTab:AddButton({
+    Name = "🔄 Atualizar Informações",
+    Callback = function()
+        gameInfo = getGameInfo()
+        gameInfoDisplay:Set(formatGameInfo(gameInfo))
+        
+        OrionLib:MakeNotification({
+            Name = "Informações Atualizadas",
+            Content = "Dados do jogo foram atualizados!",
+            Image = "rbxassetid://4483345998",
+            Time = 3
+        })
+    end    
+})
+
+-- Botão para copiar Place ID
+GameTab:AddButton({
+    Name = "📋 Copiar Place ID",
+    Callback = function()
+        local placeId = tostring(game.PlaceId)
+        if setclipboard then
+            setclipboard(placeId)
+            OrionLib:MakeNotification({
+                Name = "Place ID Copiado",
+                Content = "Place ID " .. placeId .. " copiado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            print("Place ID: " .. placeId)
+            OrionLib:MakeNotification({
+                Name = "Place ID no Console",
+                Content = "Place ID exibido no console!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para copiar Game ID
+GameTab:AddButton({
+    Name = "🎯 Copiar Game ID",
+    Callback = function()
+        local gameId = tostring(game.GameId)
+        if setclipboard then
+            setclipboard(gameId)
+            OrionLib:MakeNotification({
+                Name = "Game ID Copiado",
+                Content = "Game ID " .. gameId .. " copiado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            print("Game ID: " .. gameId)
+            OrionLib:MakeNotification({
+                Name = "Game ID no Console",
+                Content = "Game ID exibido no console!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para copiar link do jogo
+GameTab:AddButton({
+    Name = "🔗 Copiar Link do Jogo",
+    Callback = function()
+        local gameLink = "https://www.roblox.com/games/" .. game.PlaceId
+        if setclipboard then
+            setclipboard(gameLink)
+            OrionLib:MakeNotification({
+                Name = "Link Copiado",
+                Content = "Link do jogo copiado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            print("Game Link: " .. gameLink)
+            OrionLib:MakeNotification({
+                Name = "Link no Console",
+                Content = "Link exibido no console!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para copiar link do criador
+GameTab:AddButton({
+    Name = "👤 Copiar Link do Criador",
+    Callback = function()
+        local creatorLink = ""
+        if game.CreatorType == Enum.CreatorType.User then
+            creatorLink = "https://www.roblox.com/users/" .. game.CreatorId .. "/profile"
+        elseif game.CreatorType == Enum.CreatorType.Group then
+            creatorLink = "https://www.roblox.com/groups/" .. game.CreatorId
+        end
+        
+        if creatorLink ~= "" then
+            if setclipboard then
+                setclipboard(creatorLink)
+                OrionLib:MakeNotification({
+                    Name = "Link do Criador Copiado",
+                    Content = "Link do criador copiado!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            else
+                print("Creator Link: " .. creatorLink)
+                OrionLib:MakeNotification({
+                    Name = "Link no Console",
+                    Content = "Link do criador no console!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        end
+    end    
+})
+
+-- Seção de estatísticas do servidor
+GameTab:AddSection({
+    Name = "Estatísticas do Servidor"
+})
+
+local serverInfoDisplay = GameTab:AddLabel("Carregando estatísticas do servidor...")
+
+-- Função para atualizar estatísticas do servidor
+local function updateServerInfo()
+    local serverInfo = string.format([[
+🌐 Job ID: %s
+⏰ Tempo Online: %s
+👥 Players Conectados: %d/%d
+🔄 FPS Atual: %.1f
+📊 Ping Médio: %d ms
+💾 Uso de Memória: %.1f MB
+]], 
+        game.JobId:sub(1, 12) .. "...",
+        string.format("%.1f min", (tick() - game.PlaceVersion) / 60),
+        #game.Players:GetPlayers(),
+        game.Players.MaxPlayers,
+        1/game:GetService("RunService").Heartbeat:Wait(),
+        game.Players.LocalPlayer:GetNetworkPing() * 1000,
+        collectgarbage("count") / 1024
+    )
+    
+    serverInfoDisplay:Set(serverInfo)
+end
+
+-- Atualiza estatísticas do servidor periodicamente
+spawn(function()
+    while true do
+        updateServerInfo()
+        wait(3)
+    end
+end)
+
+-- Seção de informações técnicas
+GameTab:AddSection({
+    Name = "Informações Técnicas"
+})
+
+-- Informações técnicas do jogo
+local technicalInfo = string.format([[
+🔧 Versão do Engine: %s
+📱 Plataforma: %s
+💻 Sistema: %s
+🎮 Dispositivo: %s
+]], 
+    tostring(version()),
+    game:GetService("UserInputService").TouchEnabled and "Mobile" or "Desktop",
+    game:GetService("UserInputService").TouchEnabled and "Touch" or "Mouse/Keyboard",
+    game:GetService("UserInputService").GamepadEnabled and "Gamepad Detectado" or "Sem Gamepad"
+)
+
+GameTab:AddLabel(technicalInfo)
+
+-- Botão para exportar todas as informações do jogo
+GameTab:AddButton({
+    Name = "📤 Exportar Todas as Informações",
+    Callback = function()
+        local exportInfo = "=== INFORMAÇÕES COMPLETAS DO JOGO ===\n"
+        exportInfo = exportInfo .. "Data de Export: " .. os.date() .. "\n\n"
+        exportInfo = exportInfo .. formatGameInfo(gameInfo) .. "\n"
+        exportInfo = exportInfo .. "=== INFORMAÇÕES TÉCNICAS ===\n"
+        exportInfo = exportInfo .. technicalInfo .. "\n"
+        exportInfo = exportInfo .. "Job ID Completo: " .. game.JobId .. "\n"
+        
+        if setclipboard then
+            setclipboard(exportInfo)
+            OrionLib:MakeNotification({
+                Name = "Informações Exportadas",
+                Content = "Todas as informações copiadas!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            print(exportInfo)
+            OrionLib:MakeNotification({
+                Name = "Informações no Console",
+                Content = "Informações exportadas no console!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Tab de Players
+local PlayerTab = Window:MakeTab({
+    Name = "👥 Players",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Variáveis para player info
+local selectedPlayer = nil
+local playerInfoDisplay = nil
+
+-- Função para obter informações do player
+local function getPlayerInfo(player)
+    if not player then return nil end
+    
+    local info = {
+        name = player.Name,
+        displayName = player.DisplayName,
+        userId = player.UserId,
+        accountAge = player.AccountAge,
+        membershipType = tostring(player.MembershipType),
+        joinDate = "",
+        profileLink = "https://www.roblox.com/users/" .. player.UserId .. "/profile"
+    }
+    
+    -- Calcula data de criação da conta
+    local currentDate = os.time()
+    local accountCreationDate = currentDate - (player.AccountAge * 24 * 60 * 60)
+    info.joinDate = os.date("%d/%m/%Y", accountCreationDate)
+    
+    return info
+end
+
+-- Função para atualizar display de informações do player
+local function updatePlayerInfo(playerInfo)
+    if not playerInfo or not playerInfoDisplay then return end
+    
+    local infoText = string.format([[
+🎮 Nome: %s
+📝 Nome de Exibição: %s
+🆔 ID da Conta: %d
+📅 Criada em: %s
+⏰ Idade da Conta: %d dias
+💎 Membership: %s
+🔗 Link do Perfil: %s
+]], 
+        playerInfo.name,
+        playerInfo.displayName,
+        playerInfo.userId,
+        playerInfo.joinDate,
+        playerInfo.accountAge,
+        playerInfo.membershipType,
+        playerInfo.profileLink
+    )
+    
+    playerInfoDisplay:Set(infoText)
+end
+
+-- Seção de pesquisa
+PlayerTab:AddSection({
+    Name = "Pesquisar Player"
+})
+
+-- Lista de players online para dropdown
+local function getOnlinePlayerNames()
+    local players = {}
+    for _, player in pairs(game.Players:GetPlayers()) do
+        table.insert(players, player.Name)
+    end
+    return players
+end
+
+-- Dropdown para selecionar player
+local playerDropdown = PlayerTab:AddDropdown({
+    Name = "Selecionar Player Online",
+    Default = "",
+    Options = getOnlinePlayerNames(),
+    Callback = function(Value)
+        local player = game.Players:FindFirstChild(Value)
+        if player then
+            selectedPlayer = player
+            local info = getPlayerInfo(player)
+            updatePlayerInfo(info)
+            
+            OrionLib:MakeNotification({
+                Name = "Player Selecionado",
+                Content = "Informações carregadas para " .. Value,
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Textbox para pesquisa manual
+PlayerTab:AddTextbox({
+    Name = "Pesquisar por Nome",
+    Default = "",
+    TextDisappear = true,
+    Callback = function(Value)
+        if Value == "" then return end
+        
+        local player = game.Players:FindFirstChild(Value)
+        if player then
+            selectedPlayer = player
+            local info = getPlayerInfo(player)
+            updatePlayerInfo(info)
+            
+            -- Atualiza dropdown
+            playerDropdown:Refresh(getOnlinePlayerNames(), true)
+            
+            OrionLib:MakeNotification({
+                Name = "Player Encontrado",
+                Content = "Informações carregadas para " .. Value,
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            OrionLib:MakeNotification({
+                Name = "Player Não Encontrado",
+                Content = Value .. " não está no servidor",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end	  
+})
+
+-- Botão para atualizar lista de players
+PlayerTab:AddButton({
+    Name = "🔄 Atualizar Lista de Players",
+    Callback = function()
+        playerDropdown:Refresh(getOnlinePlayerNames(), true)
+        OrionLib:MakeNotification({
+            Name = "Lista Atualizada",
+            Content = "Lista de players foi atualizada!",
+            Image = "rbxassetid://4483345998",
+            Time = 2
+        })
+    end    
+})
+
+-- Seção de informações do player
+PlayerTab:AddSection({
+    Name = "Informações do Player"
+})
+
+-- Display das informações
+playerInfoDisplay = PlayerTab:AddLabel("Selecione um player para ver as informações...")
+
+-- Botões de ação
+PlayerTab:AddSection({
+    Name = "Ações Rápidas"
+})
+
+-- Botão para copiar ID
+PlayerTab:AddButton({
+    Name = "📋 Copiar ID do Player",
+    Callback = function()
+        if selectedPlayer then
+            local playerId = tostring(selectedPlayer.UserId)
+            if setclipboard then
+                setclipboard(playerId)
+                OrionLib:MakeNotification({
+                    Name = "ID Copiado",
+                    Content = "ID " .. playerId .. " copiado!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            else
+                print("Player ID: " .. playerId)
+                OrionLib:MakeNotification({
+                    Name = "ID no Console",
+                    Content = "ID exibido no console!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Erro",
+                Content = "Nenhum player selecionado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para copiar link do perfil
+PlayerTab:AddButton({
+    Name = "🔗 Copiar Link do Perfil",
+    Callback = function()
+        if selectedPlayer then
+            local profileLink = "https://www.roblox.com/users/" .. selectedPlayer.UserId .. "/profile"
+            if setclipboard then
+                setclipboard(profileLink)
+                OrionLib:MakeNotification({
+                    Name = "Link Copiado",
+                    Content = "Link do perfil copiado!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            else
+                print("Profile Link: " .. profileLink)
+                OrionLib:MakeNotification({
+                    Name = "Link no Console",
+                    Content = "Link exibido no console!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Erro",
+                Content = "Nenhum player selecionado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para teleportar para o player (se possível)
+PlayerTab:AddButton({
+    Name = "📍 Teleportar para Player",
+    Callback = function()
+        if selectedPlayer and selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local localPlayer = game.Players.LocalPlayer
+            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                localPlayer.Character.HumanoidRootPart.CFrame = selectedPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+                OrionLib:MakeNotification({
+                    Name = "Teleporte",
+                    Content = "Teleportado para " .. selectedPlayer.Name,
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Erro de Teleporte",
+                Content = "Não foi possível teleportar!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Seção de estatísticas do servidor
+PlayerTab:AddSection({
+    Name = "Estatísticas do Servidor"
+})
+
+local serverStatsLabel = PlayerTab:AddLabel("Carregando estatísticas...")
+
+-- Função para atualizar estatísticas do servidor
+local function updateServerStats()
+    local totalPlayers = #game.Players:GetPlayers()
+    local maxPlayers = game.Players.MaxPlayers
+    
+    local membershipStats = {
+        None = 0,
+        BuildersClub = 0,
+        TurboBuildersClub = 0,
+        OutrageousBuildersClub = 0,
+        Premium = 0
+    }
+    
+    for _, player in pairs(game.Players:GetPlayers()) do
+        local membershipType = tostring(player.MembershipType)
+        membershipStats[membershipType] = (membershipStats[membershipType] or 0) + 1
+    end
+    
+    local statsText = string.format([[
+👥 Players Online: %d/%d
+🆓 Grátis: %d
+💎 Premium: %d
+🏗️ Builders Club: %d
+]], 
+        totalPlayers, maxPlayers,
+        membershipStats.None or 0,
+        membershipStats.Premium or 0,
+        (membershipStats.BuildersClub or 0) + (membershipStats.TurboBuildersClub or 0) + (membershipStats.OutrageousBuildersClub or 0)
+    )
+    
+    serverStatsLabel:Set(statsText)
+end
+
+-- Atualiza estatísticas periodicamente
+spawn(function()
+    while true do
+        updateServerStats()
+        wait(5)
+    end
+end)
+
+-- Monitora entrada e saída de players para atualizar dropdown
+game.Players.PlayerAdded:Connect(function()
+    wait(1) -- Aguarda o player carregar completamente
+    playerDropdown:Refresh(getOnlinePlayerNames(), true)
+    updateServerStats()
+end)
+
+game.Players.PlayerRemoving:Connect(function()
+    wait(1)
+    playerDropdown:Refresh(getOnlinePlayerNames(), true)
+    updateServerStats()
+end)
+
+-- Tab de configurações
+local ConfigTab = Window:MakeTab({
+    Name = "⚙️ Configurações",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+ConfigTab:AddSection({
+    Name = "Configurações do Logger"
+})
+
+-- Slider para máximo de logs
+ConfigTab:AddSlider({
+    Name = "Máximo de Logs",
+    Min = 10,
+    Max = 500,
+    Default = 100,
+    Color = Color3.fromRGB(255,255,255),
+    Increment = 10,
+    ValueName = "logs",
+    Callback = function(Value)
+        maxLogs = Value
+        -- Remove logs extras se necessário
+        while #scriptLogs > maxLogs do
+            table.remove(scriptLogs, #scriptLogs)
+        end
+    end    
+})
+
+-- Toggle para diferentes tipos de detecção
+ConfigTab:AddToggle({
+    Name = "Detectar Scripts do Sistema",
+    Default = true,
+    Callback = function(Value)
+        detectSystemScripts = Value
+    end    
+})
+
+ConfigTab:AddToggle({
+    Name = "Detectar LocalScripts",
+    Default = true,
+    Callback = function(Value)
+        detectLocalScripts = Value
+    end    
+})
+
+-- Tab de informações
+local InfoTab = Window:MakeTab({
+    Name = "ℹ️ Informações",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+InfoTab:AddSection({
+    Name = "Como Usar"
+})
+
+InfoTab:AddLabel("1. Ative o Logger na aba Logs")
+InfoTab:AddLabel("2. O script detectará automaticamente")
+InfoTab:AddLabel("   novos scripts executados")
+InfoTab:AddLabel("3. Visualize os logs na aba principal")
+InfoTab:AddLabel("4. Use a aba Players para pesquisar")
+InfoTab:AddLabel("   informações de contas")
+InfoTab:AddLabel("5. Veja informações do jogo na aba Jogo")
+InfoTab:AddLabel("6. Configure nas Configurações")
+
+InfoTab:AddSection({
+    Name = "Recursos"
+})
+
+InfoTab:AddLabel("• Detecção automática de scripts")
+InfoTab:Ad
