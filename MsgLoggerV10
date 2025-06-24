@@ -1,0 +1,637 @@
+-- Roblox Message Logger usando Orion Library
+-- Captura TODAS as mensagens do servidor, incluindo histórico
+
+local OrionLib = loadstring(game:HttpGet('https://raw.githubusercontent.com/VerbalHubz/Verbal-Hub/refs/heads/main/Orion%20Hub%20Ui%20V3'))()
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- Tabela para armazenar todas as mensagens
+local MessageLog = {}
+local MaxMessages = 1000 -- Limite de mensagens para evitar lag
+
+-- Função para formatar timestamp
+local function GetTimestamp()
+    local time = os.date("*t")
+    return string.format("[%02d:%02d:%02d]", time.hour, time.min, time.sec)
+end
+
+-- Função para adicionar mensagem ao log
+local function AddMessage(player, message, messageType)
+    local timestamp = GetTimestamp()
+    local logEntry = {
+        Time = timestamp,
+        Player = player,
+        Message = message,
+        Type = messageType or "Chat"
+    }
+    
+    table.insert(MessageLog, 1, logEntry) -- Adiciona no início da tabela
+    
+    -- Remove mensagens antigas se exceder o limite
+    if #MessageLog > MaxMessages then
+        table.remove(MessageLog, #MessageLog)
+    end
+    
+    -- Envia para o Discord se habilitado
+    if DiscordEnabled and SendToDiscord then
+        SendToDiscordWebhook(player, message, messageType or "Chat")
+    end
+end
+
+-- Função para capturar mensagens do chat
+local function SetupChatLogger()
+    -- Método 1: PlayerChatted (funciona na maioria dos jogos)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            player.Chatted:Connect(function(message)
+                AddMessage(player.Name, message, "Chat")
+            end)
+        end
+    end
+    
+    -- Conecta para novos jogadores
+    Players.PlayerAdded:Connect(function(player)
+        player.Chatted:Connect(function(message)
+            AddMessage(player.Name, message, "Chat")
+        end)
+    end)
+    
+    -- Captura suas próprias mensagens
+    LocalPlayer.Chatted:Connect(function(message)
+        AddMessage(LocalPlayer.Name, message, "Chat (Você)")
+    end)
+end
+
+-- Função para tentar capturar mensagens via RemoteEvents
+local function SetupRemoteLogger()
+    local function HookRemote(remote)
+        if remote:IsA("RemoteEvent") then
+            remote.OnClientEvent:Connect(function(...)
+                local args = {...}
+                -- Verifica se pode ser uma mensagem de chat
+                for i, arg in pairs(args) do
+                    if type(arg) == "string" and string.len(arg) > 0 and string.len(arg) < 200 then
+                        -- Possível mensagem de chat
+                        AddMessage("Sistema", arg, "RemoteEvent: " .. remote.Name)
+                    end
+                end
+            end)
+        end
+    end
+    
+    -- Hook RemoteEvents existentes
+    for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+        HookRemote(obj)
+    end
+    
+    -- Hook novos RemoteEvents
+    ReplicatedStorage.DescendantAdded:Connect(function(obj)
+        wait(0.1) -- Pequena espera para garantir que o objeto esteja pronto
+        HookRemote(obj)
+    end)
+end
+
+-- Função para tentar capturar mensagens via StarterGui
+local function SetupGuiLogger()
+    local StarterGui = game:GetService("StarterGui")
+    
+    -- Hook para capturar mensagens do sistema
+    StarterGui.ChildAdded:Connect(function(obj)
+        if obj:IsA("ScreenGui") then
+            obj.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("TextLabel") or descendant:IsA("TextBox") then
+                    descendant:GetPropertyChangedSignal("Text"):Connect(function()
+                        local text = descendant.Text
+                        if text and string.len(text) > 0 and string.len(text) < 200 then
+                            AddMessage("GUI", text, "Interface")
+                        end
+                    end)
+                end
+            end)
+        end
+    end)
+end
+
+-- Criar a interface com Orion
+local Window = OrionLib:MakeWindow({
+    Name = "📝 Message Logger Pro",
+    HidePremium = false,
+    SaveConfig = true,
+    ConfigFolder = "MessageLogger"
+})
+
+-- Aba principal
+local MainTab = Window:MakeTab({
+    Name = "📋 Logger Principal",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Aba de configurações
+local ConfigTab = Window:MakeTab({
+    Name = "⚙️ Configurações",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Aba do Discord
+local DiscordTab = Window:MakeTab({
+    Name = "🤖 Discord Bot",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Variáveis de controle
+local LoggingEnabled = true
+local ShowSystemMessages = true
+local ShowOwnMessages = true
+local AutoScroll = true
+
+-- Configurações do Discord
+local DiscordWebhook = "https://discord.com/api/webhooks/1387189862012158073/y8aeOn8SWU0bbIZnhImWImAlYUtwoRUyfWY1hzk6BsVgcCmcj2Z05JBRMdN8xktxd4tP"
+local DiscordEnabled = false
+local SendToDiscord = false
+local DiscordCooldown = 2 -- Segundos entre mensagens para evitar spam
+
+local LastDiscordSend = 0
+
+-- Função para enviar mensagem ao Discord
+local function SendToDiscordWebhook(playerName, message, messageType)
+    if not DiscordEnabled or not SendToDiscord then return end
+    
+    local currentTime = tick()
+    if currentTime - LastDiscordSend < DiscordCooldown then return end
+    
+    LastDiscordSend = currentTime
+    
+    spawn(function()
+        local success, error = pcall(function()
+            local HttpService = game:GetService("HttpService")
+            local MarketplaceService = game:GetService("MarketplaceService")
+            
+            -- Tentar obter nome do jogo
+            local gameName = "Jogo Desconhecido"
+            pcall(function()
+                gameName = MarketplaceService:GetProductInfo(game.PlaceId).Name
+            end)
+            
+            local localTime = os.date("%d/%m/%Y às %H:%M:%S")
+            
+            -- Formato mais simples que funciona melhor
+            local data = {
+                content = "",
+                embeds = {
+                    {
+                        title = "📝 Nova Mensagem",
+                        color = 3447003,
+                        fields = {
+                            {
+                                name = "👤 Usuário",
+                                value = tostring(playerName),
+                                inline = true
+                            },
+                            {
+                                name = "💬 Mensagem",
+                                value = tostring(message),
+                                inline = false
+                            },
+                            {
+                                name = "🎮 Jogo",
+                                value = tostring(gameName),
+                                inline = true
+                            },
+                            {
+                                name = "📅 Data/Hora",
+                                value = tostring(localTime),
+                                inline = true
+                            },
+                            {
+                                name = "🔖 Tipo",
+                                value = tostring(messageType),
+                                inline = true
+                            }
+                        },
+                        footer = {
+                            text = "Roblox Logger Pro"
+                        }
+                    }
+                }
+            }
+            
+            local jsonData = HttpService:JSONEncode(data)
+            
+            local response = HttpService:PostAsync(
+                DiscordWebhook, 
+                jsonData, 
+                Enum.HttpContentType.ApplicationJson,
+                false
+            )
+            
+            MessagesSentToDiscord = MessagesSentToDiscord + 1
+            print("✅ Mensagem enviada para Discord:", playerName, "-", message)
+        end)
+        
+        if not success then
+            print("❌ Erro ao enviar para Discord:", error)
+            warn("Discord Error: " .. tostring(error))
+        end
+    end)
+end
+
+-- Seção de controle
+local ControlSection = MainTab:AddSection({
+    Name = "🎮 Controles do Logger"
+})
+
+ControlSection:AddToggle({
+    Name = "Ativar Logger",
+    Default = true,
+    Callback = function(Value)
+        LoggingEnabled = Value
+    end    
+})
+
+ControlSection:AddToggle({
+    Name = "Mostrar Mensagens do Sistema",
+    Default = true,
+    Callback = function(Value)
+        ShowSystemMessages = Value
+    end    
+})
+
+ControlSection:AddToggle({
+    Name = "Mostrar Suas Mensagens",
+    Default = true,
+    Callback = function(Value)
+        ShowOwnMessages = Value
+    end    
+})
+
+ControlSection:AddButton({
+    Name = "🗑️ Limpar Log",
+    Callback = function()
+        MessageLog = {}
+        OrionLib:MakeNotification({
+            Name = "Logger",
+            Content = "Log de mensagens limpo!",
+            Image = "rbxassetid://4483345998",
+            Time = 3
+        })
+    end    
+})
+
+-- Seção de visualização
+local ViewSection = MainTab:AddSection({
+    Name = "👁️ Visualização de Mensagens"
+})
+
+local MessageDisplay = ViewSection:AddParagraph("Mensagens", "Aguardando mensagens...")
+
+-- Função para atualizar a exibição
+local function UpdateDisplay()
+    if not LoggingEnabled then return end
+    
+    local displayText = ""
+    local count = 0
+    
+    for i, msg in pairs(MessageLog) do
+        if count >= 10 then break end -- Mostra apenas as 10 últimas
+        
+        local shouldShow = true
+        
+        if msg.Type:find("Sistema") and not ShowSystemMessages then
+            shouldShow = false
+        end
+        
+        if msg.Type:find("Você") and not ShowOwnMessages then
+            shouldShow = false
+        end
+        
+        if shouldShow then
+            displayText = displayText .. msg.Time .. " [" .. msg.Player .. "]: " .. msg.Message .. "\n"
+            count = count + 1
+        end
+    end
+    
+    if displayText == "" then
+        displayText = "Nenhuma mensagem para exibir..."
+    end
+    
+    MessageDisplay:Set("Últimas Mensagens", displayText)
+end
+
+-- Seção de estatísticas
+local StatsSection = ConfigTab:AddSection({
+    Name = "📊 Estatísticas"
+})
+
+local StatsDisplay = StatsSection:AddParagraph("Stats", "Carregando...")
+
+-- Função para atualizar estatísticas
+local function UpdateStats()
+    local totalMessages = #MessageLog
+    local playersCount = #Players:GetPlayers()
+    
+    local statsText = string.format(
+        "Total de Mensagens: %d\nJogadores Online: %d\nLimite do Buffer: %d",
+        totalMessages,
+        playersCount,
+        MaxMessages
+    )
+    
+    StatsDisplay:Set("Estatísticas do Logger", statsText)
+    
+    -- Atualizar stats do Discord
+    local discordStatsText = string.format(
+        "Mensagens Enviadas: %d\nStatus: %s\nWebhook: %s",
+        MessagesSentToDiscord,
+        DiscordEnabled and "🟢 Ativo" or "🔴 Inativo",
+        SendToDiscord and "🟢 Enviando" or "🔴 Pausado"
+    )
+    
+    DiscordStatsDisplay:Set("Estatísticas do Discord", discordStatsText)
+end
+
+-- Configurações avançadas
+local AdvancedSection = ConfigTab:AddSection({
+    Name = "🔧 Configurações Avançadas"
+})
+
+AdvancedSection:AddSlider({
+    Name = "Limite de Mensagens",
+    Min = 100,
+    Max = 2000,
+    Default = 1000,
+    Color = Color3.fromRGB(255,255,255),
+    Increment = 50,
+    ValueName = "mensagens",
+    Callback = function(Value)
+        MaxMessages = Value
+    end    
+})
+
+AdvancedSection:AddButton({
+    Name = "💾 Exportar Log",
+    Callback = function()
+        local exportText = "=== LOG DE MENSAGENS ===\n"
+        for _, msg in pairs(MessageLog) do
+            exportText = exportText .. msg.Time .. " [" .. msg.Player .. "] (" .. msg.Type .. "): " .. msg.Message .. "\n"
+        end
+        
+        -- Tenta copiar para clipboard (nem sempre funciona no Roblox)
+        setclipboard(exportText)
+        
+        OrionLib:MakeNotification({
+            Name = "Logger",
+            Content = "Log exportado para clipboard!",
+            Image = "rbxassetid://4483345998",
+            Time = 5
+        })
+    end    
+})
+
+-- ===== CONFIGURAÇÕES DO DISCORD =====
+local DiscordMainSection = DiscordTab:AddSection({
+    Name = "🤖 Configurações do Bot Discord"
+})
+
+DiscordMainSection:AddToggle({
+    Name = "Ativar Discord Bot",
+    Default = false,
+    Callback = function(Value)
+        DiscordEnabled = Value
+        if Value then
+            OrionLib:MakeNotification({
+                Name = "Discord Bot",
+                Content = "Bot do Discord ativado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+DiscordMainSection:AddToggle({
+    Name = "Enviar Mensagens para Discord",
+    Default = false,
+    Callback = function(Value)
+        SendToDiscord = Value
+        if Value and DiscordEnabled then
+            OrionLib:MakeNotification({
+                Name = "Discord Bot",
+                Content = "Enviando mensagens para o Discord!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+DiscordMainSection:AddSlider({
+    Name = "Cooldown entre Mensagens",
+    Min = 1,
+    Max = 10,
+    Default = 2,
+    Color = Color3.fromRGB(114, 137, 218),
+    Increment = 1,
+    ValueName = "segundos",
+    Callback = function(Value)
+        DiscordCooldown = Value
+    end    
+})
+
+DiscordMainSection:AddButton({
+    Name = "🧪 Testar Webhook",
+    Callback = function()
+        if not DiscordEnabled then
+            OrionLib:MakeNotification({
+                Name = "Discord Bot",
+                Content = "Ative o Discord Bot primeiro!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+            return
+        end
+        
+        -- Teste mais simples e direto
+        spawn(function()
+            local success, error = pcall(function()
+                local HttpService = game:GetService("HttpService")
+                
+                local testData = {
+                    content = "🧪 **TESTE DO WEBHOOK** 🧪",
+                    embeds = {
+                        {
+                            title = "✅ Logger Funcionando!",
+                            description = "Se você está vendo esta mensagem, o webhook está configurado corretamente!",
+                            color = 65280, -- Verde
+                            fields = {
+                                {
+                                    name = "📅 Testado em",
+                                    value = os.date("%d/%m/%Y às %H:%M:%S"),
+                                    inline = true
+                                },
+                                {
+                                    name = "🎮 Jogo",
+                                    value = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or "Jogo Desconhecido",
+                                    inline = true
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                local jsonData = HttpService:JSONEncode(testData)
+                local response = HttpService:PostAsync(DiscordWebhook, jsonData, Enum.HttpContentType.ApplicationJson, false)
+                
+                print("✅ Teste enviado com sucesso!")
+                print("Response:", response)
+            end)
+            
+            if success then
+                OrionLib:MakeNotification({
+                    Name = "Discord Bot",
+                    Content = "✅ Teste enviado com sucesso!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 5
+                })
+            else
+                OrionLib:MakeNotification({
+                    Name = "Discord Bot",
+                    Content = "❌ Erro: " .. tostring(error),
+                    Image = "rbxassetid://4483345998",
+                    Time = 8
+                })
+                print("❌ Erro no teste:", error)
+                warn("Erro detalhado:", error)
+            end
+        end)
+    end    
+})
+
+-- Botão para verificar se HTTP está habilitado
+DiscordMainSection:AddButton({
+    Name = "🔍 Verificar HTTP",
+    Callback = function()
+        local HttpService = game:GetService("HttpService")
+        local httpEnabled = HttpService.HttpEnabled
+        
+        if httpEnabled then
+            OrionLib:MakeNotification({
+                Name = "HTTP Status",
+                Content = "✅ HTTP está habilitado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            OrionLib:MakeNotification({
+                Name = "HTTP Status",
+                Content = "❌ HTTP está DESABILITADO! Habilite nas configurações do jogo.",
+                Image = "rbxassetid://4483345998",
+                Time = 8
+            })
+        end
+        
+        print("HTTP Enabled:", httpEnabled)
+    end    
+})
+
+-- Seção de filtros do Discord
+local DiscordFiltersSection = DiscordTab:AddSection({
+    Name = "🔍 Filtros Discord"
+})
+
+local SendChatMessages = true
+local SendSystemMessages = false
+local SendOwnMessages = true
+
+DiscordFiltersSection:AddToggle({
+    Name = "Enviar Mensagens de Chat",
+    Default = true,
+    Callback = function(Value)
+        SendChatMessages = Value
+    end    
+})
+
+DiscordFiltersSection:AddToggle({
+    Name = "Enviar Mensagens do Sistema",
+    Default = false,
+    Callback = function(Value)
+        SendSystemMessages = Value
+    end    
+})
+
+DiscordFiltersSection:AddToggle({
+    Name = "Enviar Suas Mensagens",
+    Default = true,
+    Callback = function(Value)
+        SendOwnMessages = Value
+    end    
+})
+
+-- Seção de estatísticas do Discord
+local DiscordStatsSection = DiscordTab:AddSection({
+    Name = "📊 Estatísticas Discord"
+})
+
+local DiscordStatsDisplay = DiscordStatsSection:AddParagraph("Discord Stats", "Carregando...")
+
+-- Contador de mensagens enviadas
+local MessagesSentToDiscord = 0
+
+-- Atualizar função SendToDiscordWebhook para incluir filtros
+local originalSendToDiscordWebhook = SendToDiscordWebhook
+SendToDiscordWebhook = function(playerName, message, messageType)
+    if not DiscordEnabled or not SendToDiscord then return end
+    
+    -- Aplicar filtros
+    local shouldSend = false
+    
+    if messageType:find("Chat") and SendChatMessages then
+        if messageType:find("Você") and SendOwnMessages then
+            shouldSend = true
+        elseif not messageType:find("Você") then
+            shouldSend = true
+        end
+    elseif not messageType:find("Chat") and SendSystemMessages then
+        shouldSend = true
+    end
+    
+    if not shouldSend then return end
+    
+    local currentTime = tick()
+    if currentTime - LastDiscordSend < DiscordCooldown then return end
+    
+    LastDiscordSend = currentTime
+    MessagesSentToDiscord = MessagesSentToDiscord + 1
+    
+    local gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+    local timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
+    local localTime = os.date("%d/%m/%Y às %H:%M:%S")
+    
+    local embed = {
+        {
+            title = "📝 Nova Mensagem Capturada",
+            description = "**Mensagem:** " .. message,
+            color = 3447003, -- Azul
+            fields = {
+                {
+                    name = "👤 Usuário",
+                    value = playerName,
+                    inline = true
+                },
+                {
+                    name = "🎮 Jogo",
+                    value = gameName,
+                    inline = true
+                },
+                {
+                    name = "📅 Data/Hora",
+                    value = localTime,
+                    inline = true
+                },
+            
