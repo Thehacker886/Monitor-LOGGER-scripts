@@ -1,0 +1,335 @@
+-- Script Logger usando Orion Library
+-- Monitora e exibe scripts executados no servidor
+
+local OrionLib = loadstring(game:HttpGet('https://raw.githubusercontent.com/VerbalHubz/Verbal-Hub/refs/heads/main/Orion%20Hub%20Ui%20V3'))()
+
+-- Configuração da janela principal
+local Window = OrionLib:MakeWindow({
+    Name = "Script Logger - Monitor de Atividades",
+    HidePremium = false,
+    SaveConfig = true,
+    ConfigFolder = "ScriptLogger"
+})
+
+-- Variáveis globais
+local scriptLogs = {}
+local maxLogs = 100
+local isLogging = true
+local logCount = 0
+
+-- Função para formatar timestamp
+local function getTimestamp()
+    return os.date("[%H:%M:%S]")
+end
+
+-- Função para adicionar log
+local function addLog(playerName, scriptInfo, scriptType)
+    if not isLogging then return end
+    
+    logCount = logCount + 1
+    local logEntry = {
+        id = logCount,
+        timestamp = getTimestamp(),
+        player = playerName or "Desconhecido",
+        script = scriptInfo or "Script Desconhecido",
+        type = scriptType or "Executado",
+        time = tick()
+    }
+    
+    table.insert(scriptLogs, 1, logEntry)
+    
+    -- Limita o número de logs
+    if #scriptLogs > maxLogs then
+        table.remove(scriptLogs, #scriptLogs)
+    end
+    
+    -- Atualiza a interface se existir
+    if logListBox then
+        updateLogDisplay()
+    end
+end
+
+-- Função para detectar scripts
+local function detectScripts()
+    -- Monitor de novos scripts criados
+    local function onChildAdded(child)
+        if child:IsA("LocalScript") or child:IsA("Script") then
+            local player = game.Players:GetPlayerFromCharacter(child.Parent) or 
+                          game.Players:FindFirstChild(child.Parent.Name)
+            local playerName = player and player.Name or "Sistema"
+            
+            addLog(playerName, child.Name, "Script Criado")
+        end
+    end
+    
+    -- Monitora workspace
+    workspace.ChildAdded:Connect(onChildAdded)
+    workspace.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+            local player = game.Players:GetPlayerFromCharacter(descendant.Parent) or 
+                          game.Players:FindFirstChild(descendant.Parent.Name)
+            local playerName = player and player.Name or "Sistema"
+            
+            addLog(playerName, descendant.Name, "Script Detectado")
+        end
+    end)
+    
+    -- Monitora players
+    for _, player in pairs(game.Players:GetPlayers()) do
+        if player.Character then
+            player.Character.ChildAdded:Connect(onChildAdded)
+            player.Character.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+                    addLog(player.Name, descendant.Name, "Script no Character")
+                end
+            end)
+        end
+        
+        player.CharacterAdded:Connect(function(character)
+            character.ChildAdded:Connect(onChildAdded)
+            character.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+                    addLog(player.Name, descendant.Name, "Script no Character")
+                end
+            end)
+        end)
+    end
+    
+    -- Monitora novos players
+    game.Players.PlayerAdded:Connect(function(player)
+        player.CharacterAdded:Connect(function(character)
+            character.ChildAdded:Connect(onChildAdded)
+            character.DescendantAdded:Connect(function(descendant)
+                if descendant:IsA("LocalScript") or descendant:IsA("Script") then
+                    addLog(player.Name, descendant.Name, "Script no Character")
+                end
+            end)
+        end)
+    end)
+end
+
+-- Tab principal - Logs
+local LogTab = Window:MakeTab({
+    Name = "📋 Logs de Scripts",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Variável global para o log display
+logListBox = nil
+
+-- Função para atualizar display dos logs
+function updateLogDisplay()
+    if not logListBox then return end
+    
+    local displayText = ""
+    for i, log in ipairs(scriptLogs) do
+        if i > 20 then break end -- Mostra apenas os 20 mais recentes
+        displayText = displayText .. string.format(
+            "%s [%s] %s executou: %s (%s)\n",
+            log.timestamp,
+            log.type,
+            log.player,
+            log.script,
+            log.id
+        )
+    end
+    
+    if displayText == "" then
+        displayText = "Nenhum script detectado ainda..."
+    end
+    
+    -- Atualiza o texto (isso pode variar dependendo da versão da Orion)
+    -- Como a Orion não tem update direto para labels, recriaremos se necessário
+end
+
+-- Seção de status
+LogTab:AddSection({
+    Name = "Status do Logger"
+})
+
+local statusLabel = LogTab:AddLabel("Status: Ativo - Logs: 0")
+
+-- Toggle para ativar/desativar logging
+LogTab:AddToggle({
+    Name = "Ativar Logger",
+    Default = true,
+    Callback = function(Value)
+        isLogging = Value
+        statusLabel:Set(string.format("Status: %s - Logs: %d", 
+            isLogging and "Ativo" or "Inativo", #scriptLogs))
+    end    
+})
+
+-- Seção de logs
+LogTab:AddSection({
+    Name = "Logs Recentes"
+})
+
+-- Display dos logs
+local logDisplay = LogTab:AddLabel("Aguardando detecção de scripts...")
+
+-- Função para atualizar o display periodicamente
+spawn(function()
+    while true do
+        wait(1)
+        if isLogging then
+            local displayText = ""
+            for i = 1, math.min(10, #scriptLogs) do
+                local log = scriptLogs[i]
+                displayText = displayText .. string.format(
+                    "%s %s: %s\n",
+                    log.timestamp,
+                    log.player,
+                    log.script
+                )
+            end
+            
+            if displayText == "" then
+                displayText = "Nenhum script detectado..."
+            end
+            
+            logDisplay:Set(displayText)
+            statusLabel:Set(string.format("Status: %s - Logs: %d", 
+                isLogging and "Ativo" or "Inativo", #scriptLogs))
+        end
+    end
+end)
+
+-- Botão para limpar logs
+LogTab:AddButton({
+    Name = "Limpar Logs",
+    Callback = function()
+        scriptLogs = {}
+        logCount = 0
+        logDisplay:Set("Logs limpos!")
+        statusLabel:Set(string.format("Status: %s - Logs: 0", 
+            isLogging and "Ativo" or "Inativo"))
+    end    
+})
+
+-- Tab de configurações
+local ConfigTab = Window:MakeTab({
+    Name = "⚙️ Configurações",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+ConfigTab:AddSection({
+    Name = "Configurações do Logger"
+})
+
+-- Slider para máximo de logs
+ConfigTab:AddSlider({
+    Name = "Máximo de Logs",
+    Min = 10,
+    Max = 500,
+    Default = 100,
+    Color = Color3.fromRGB(255,255,255),
+    Increment = 10,
+    ValueName = "logs",
+    Callback = function(Value)
+        maxLogs = Value
+        -- Remove logs extras se necessário
+        while #scriptLogs > maxLogs do
+            table.remove(scriptLogs, #scriptLogs)
+        end
+    end    
+})
+
+-- Toggle para diferentes tipos de detecção
+ConfigTab:AddToggle({
+    Name = "Detectar Scripts do Sistema",
+    Default = true,
+    Callback = function(Value)
+        detectSystemScripts = Value
+    end    
+})
+
+ConfigTab:AddToggle({
+    Name = "Detectar LocalScripts",
+    Default = true,
+    Callback = function(Value)
+        detectLocalScripts = Value
+    end    
+})
+
+-- Tab de informações
+local InfoTab = Window:MakeTab({
+    Name = "ℹ️ Informações",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+InfoTab:AddSection({
+    Name = "Como Usar"
+})
+
+InfoTab:AddLabel("1. Ative o Logger na aba Logs")
+InfoTab:AddLabel("2. O script detectará automaticamente")
+InfoTab:AddLabel("   novos scripts executados")
+InfoTab:AddLabel("3. Visualize os logs na aba principal")
+InfoTab:AddLabel("4. Configure nas Configurações")
+
+InfoTab:AddSection({
+    Name = "Recursos"
+})
+
+InfoTab:AddLabel("• Detecção automática de scripts")
+InfoTab:AddLabel("• Identificação do jogador")
+InfoTab:AddLabel("• Timestamp dos eventos")
+InfoTab:AddLabel("• Histórico configurável")
+InfoTab:AddLabel("• Interface limpa e organizada")
+
+-- Botão de exportar logs (salva no clipboard se possível)
+InfoTab:AddButton({
+    Name = "Exportar Logs",
+    Callback = function()
+        local exportText = "=== SCRIPT LOGGER EXPORT ===\n"
+        exportText = exportText .. string.format("Data: %s\n", os.date())
+        exportText = exportText .. string.format("Total de Logs: %d\n\n", #scriptLogs)
+        
+        for _, log in ipairs(scriptLogs) do
+            exportText = exportText .. string.format(
+                "%s [%s] %s executou: %s\n",
+                log.timestamp,
+                log.type,
+                log.player,
+                log.script
+            )
+        end
+        
+        -- Tenta copiar para clipboard (nem sempre funciona no Roblox)
+        if setclipboard then
+            setclipboard(exportText)
+            OrionLib:MakeNotification({
+                Name = "Exportação",
+                Content = "Logs copiados para clipboard!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            print(exportText)
+            OrionLib:MakeNotification({
+                Name = "Exportação",
+                Content = "Logs exportados no console!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Inicializa o sistema de detecção
+detectScripts()
+
+-- Notification de inicialização
+OrionLib:MakeNotification({
+    Name = "Script Logger",
+    Content = "Logger ativado! Monitorando scripts...",
+    Image = "rbxassetid://4483345998",
+    Time = 5
+})
+
+-- Inicializa a Orion
+OrionLib:Init()
