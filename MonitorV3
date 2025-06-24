@@ -254,6 +254,316 @@ ConfigTab:AddToggle({
     end    
 })
 
+-- Tab de Players
+local PlayerTab = Window:MakeTab({
+    Name = "👥 Players",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Variáveis para player info
+local selectedPlayer = nil
+local playerInfoDisplay = nil
+
+-- Função para obter informações do player
+local function getPlayerInfo(player)
+    if not player then return nil end
+    
+    local info = {
+        name = player.Name,
+        displayName = player.DisplayName,
+        userId = player.UserId,
+        accountAge = player.AccountAge,
+        membershipType = tostring(player.MembershipType),
+        joinDate = "",
+        profileLink = "https://www.roblox.com/users/" .. player.UserId .. "/profile"
+    }
+    
+    -- Calcula data de criação da conta
+    local currentDate = os.time()
+    local accountCreationDate = currentDate - (player.AccountAge * 24 * 60 * 60)
+    info.joinDate = os.date("%d/%m/%Y", accountCreationDate)
+    
+    return info
+end
+
+-- Função para atualizar display de informações do player
+local function updatePlayerInfo(playerInfo)
+    if not playerInfo or not playerInfoDisplay then return end
+    
+    local infoText = string.format([[
+🎮 Nome: %s
+📝 Nome de Exibição: %s
+🆔 ID da Conta: %d
+📅 Criada em: %s
+⏰ Idade da Conta: %d dias
+💎 Membership: %s
+🔗 Link do Perfil: %s
+]], 
+        playerInfo.name,
+        playerInfo.displayName,
+        playerInfo.userId,
+        playerInfo.joinDate,
+        playerInfo.accountAge,
+        playerInfo.membershipType,
+        playerInfo.profileLink
+    )
+    
+    playerInfoDisplay:Set(infoText)
+end
+
+-- Seção de pesquisa
+PlayerTab:AddSection({
+    Name = "Pesquisar Player"
+})
+
+-- Lista de players online para dropdown
+local function getOnlinePlayerNames()
+    local players = {}
+    for _, player in pairs(game.Players:GetPlayers()) do
+        table.insert(players, player.Name)
+    end
+    return players
+end
+
+-- Dropdown para selecionar player
+local playerDropdown = PlayerTab:AddDropdown({
+    Name = "Selecionar Player Online",
+    Default = "",
+    Options = getOnlinePlayerNames(),
+    Callback = function(Value)
+        local player = game.Players:FindFirstChild(Value)
+        if player then
+            selectedPlayer = player
+            local info = getPlayerInfo(player)
+            updatePlayerInfo(info)
+            
+            OrionLib:MakeNotification({
+                Name = "Player Selecionado",
+                Content = "Informações carregadas para " .. Value,
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Textbox para pesquisa manual
+PlayerTab:AddTextbox({
+    Name = "Pesquisar por Nome",
+    Default = "",
+    TextDisappear = true,
+    Callback = function(Value)
+        if Value == "" then return end
+        
+        local player = game.Players:FindFirstChild(Value)
+        if player then
+            selectedPlayer = player
+            local info = getPlayerInfo(player)
+            updatePlayerInfo(info)
+            
+            -- Atualiza dropdown
+            playerDropdown:Refresh(getOnlinePlayerNames(), true)
+            
+            OrionLib:MakeNotification({
+                Name = "Player Encontrado",
+                Content = "Informações carregadas para " .. Value,
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        else
+            OrionLib:MakeNotification({
+                Name = "Player Não Encontrado",
+                Content = Value .. " não está no servidor",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end	  
+})
+
+-- Botão para atualizar lista de players
+PlayerTab:AddButton({
+    Name = "🔄 Atualizar Lista de Players",
+    Callback = function()
+        playerDropdown:Refresh(getOnlinePlayerNames(), true)
+        OrionLib:MakeNotification({
+            Name = "Lista Atualizada",
+            Content = "Lista de players foi atualizada!",
+            Image = "rbxassetid://4483345998",
+            Time = 2
+        })
+    end    
+})
+
+-- Seção de informações do player
+PlayerTab:AddSection({
+    Name = "Informações do Player"
+})
+
+-- Display das informações
+playerInfoDisplay = PlayerTab:AddLabel("Selecione um player para ver as informações...")
+
+-- Botões de ação
+PlayerTab:AddSection({
+    Name = "Ações Rápidas"
+})
+
+-- Botão para copiar ID
+PlayerTab:AddButton({
+    Name = "📋 Copiar ID do Player",
+    Callback = function()
+        if selectedPlayer then
+            local playerId = tostring(selectedPlayer.UserId)
+            if setclipboard then
+                setclipboard(playerId)
+                OrionLib:MakeNotification({
+                    Name = "ID Copiado",
+                    Content = "ID " .. playerId .. " copiado!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            else
+                print("Player ID: " .. playerId)
+                OrionLib:MakeNotification({
+                    Name = "ID no Console",
+                    Content = "ID exibido no console!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Erro",
+                Content = "Nenhum player selecionado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para copiar link do perfil
+PlayerTab:AddButton({
+    Name = "🔗 Copiar Link do Perfil",
+    Callback = function()
+        if selectedPlayer then
+            local profileLink = "https://www.roblox.com/users/" .. selectedPlayer.UserId .. "/profile"
+            if setclipboard then
+                setclipboard(profileLink)
+                OrionLib:MakeNotification({
+                    Name = "Link Copiado",
+                    Content = "Link do perfil copiado!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            else
+                print("Profile Link: " .. profileLink)
+                OrionLib:MakeNotification({
+                    Name = "Link no Console",
+                    Content = "Link exibido no console!",
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Erro",
+                Content = "Nenhum player selecionado!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Botão para teleportar para o player (se possível)
+PlayerTab:AddButton({
+    Name = "📍 Teleportar para Player",
+    Callback = function()
+        if selectedPlayer and selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local localPlayer = game.Players.LocalPlayer
+            if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                localPlayer.Character.HumanoidRootPart.CFrame = selectedPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+                OrionLib:MakeNotification({
+                    Name = "Teleporte",
+                    Content = "Teleportado para " .. selectedPlayer.Name,
+                    Image = "rbxassetid://4483345998",
+                    Time = 3
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Erro de Teleporte",
+                Content = "Não foi possível teleportar!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    end    
+})
+
+-- Seção de estatísticas do servidor
+PlayerTab:AddSection({
+    Name = "Estatísticas do Servidor"
+})
+
+local serverStatsLabel = PlayerTab:AddLabel("Carregando estatísticas...")
+
+-- Função para atualizar estatísticas do servidor
+local function updateServerStats()
+    local totalPlayers = #game.Players:GetPlayers()
+    local maxPlayers = game.Players.MaxPlayers
+    
+    local membershipStats = {
+        None = 0,
+        BuildersClub = 0,
+        TurboBuildersClub = 0,
+        OutrageousBuildersClub = 0,
+        Premium = 0
+    }
+    
+    for _, player in pairs(game.Players:GetPlayers()) do
+        local membershipType = tostring(player.MembershipType)
+        membershipStats[membershipType] = (membershipStats[membershipType] or 0) + 1
+    end
+    
+    local statsText = string.format([[
+👥 Players Online: %d/%d
+🆓 Grátis: %d
+💎 Premium: %d
+🏗️ Builders Club: %d
+]], 
+        totalPlayers, maxPlayers,
+        membershipStats.None or 0,
+        membershipStats.Premium or 0,
+        (membershipStats.BuildersClub or 0) + (membershipStats.TurboBuildersClub or 0) + (membershipStats.OutrageousBuildersClub or 0)
+    )
+    
+    serverStatsLabel:Set(statsText)
+end
+
+-- Atualiza estatísticas periodicamente
+spawn(function()
+    while true do
+        updateServerStats()
+        wait(5)
+    end
+end)
+
+-- Monitora entrada e saída de players para atualizar dropdown
+game.Players.PlayerAdded:Connect(function()
+    wait(1) -- Aguarda o player carregar completamente
+    playerDropdown:Refresh(getOnlinePlayerNames(), true)
+    updateServerStats()
+end)
+
+game.Players.PlayerRemoving:Connect(function()
+    wait(1)
+    playerDropdown:Refresh(getOnlinePlayerNames(), true)
+    updateServerStats()
+end)
+
 -- Tab de informações
 local InfoTab = Window:MakeTab({
     Name = "ℹ️ Informações",
@@ -269,7 +579,9 @@ InfoTab:AddLabel("1. Ative o Logger na aba Logs")
 InfoTab:AddLabel("2. O script detectará automaticamente")
 InfoTab:AddLabel("   novos scripts executados")
 InfoTab:AddLabel("3. Visualize os logs na aba principal")
-InfoTab:AddLabel("4. Configure nas Configurações")
+InfoTab:AddLabel("4. Use a aba Players para pesquisar")
+InfoTab:AddLabel("   informações de contas")
+InfoTab:AddLabel("5. Configure nas Configurações")
 
 InfoTab:AddSection({
     Name = "Recursos"
@@ -279,6 +591,8 @@ InfoTab:AddLabel("• Detecção automática de scripts")
 InfoTab:AddLabel("• Identificação do jogador")
 InfoTab:AddLabel("• Timestamp dos eventos")
 InfoTab:AddLabel("• Histórico configurável")
+InfoTab:AddLabel("• Pesquisa de players no servidor")
+InfoTab:AddLabel("• Informações detalhadas da conta")
 InfoTab:AddLabel("• Interface limpa e organizada")
 
 -- Botão de exportar logs (salva no clipboard se possível)
